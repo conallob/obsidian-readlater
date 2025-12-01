@@ -1,0 +1,23 @@
+{
+  "description": "Example configuration using environment variables",
+  "outputFile": "ReadLater/Clippings.md",
+  "appendMode": true,
+  "vaultPath": "/Users/yourname/Documents/ObsidianVault",
+  "gitSync": false,
+  "providers": {
+    "wired": {
+      "enabled": true,
+      "credentials": {
+        "username": "env://WIRED_USERNAME",
+        "password": "env://WIRED_PASSWORD"
+      }
+    },
+    "guardian": {
+      "enabled": true,
+      "credentials": {
+        "username": "env://GUARDIAN_USERNAME",
+        "password": "env://GUARDIAN_PASSWORD"
+      }
+    }
+  }
+}

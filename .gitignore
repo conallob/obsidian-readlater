@@ -1,0 +1,26 @@
+# Logs
+*.log
+npm-debug.log*
+
+# Dependencies
+node_modules/
+
+# Build
+main.js
+*.js.map
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+
+# Credentials (never commit these!)
+.env
+credentials.json
+auth-state/

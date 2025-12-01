@@ -1,0 +1,44 @@
+{
+  "outputFile": "ReadLater/Clippings.md",
+  "appendMode": true,
+  "vaultPath": "/Users/yourname/Documents/MyVault",
+  "gitSync": false,
+  "template": "## {{title}}\n- **Source:** {{source}}\n- **URL:** {{url}}\n- **Author:** {{author}}\n- **Date:** {{date}}\n{{#if excerpt}}\n- **Excerpt:** {{excerpt}}\n{{/if}}\n\n---\n",
+  "providers": {
+    "wired": {
+      "enabled": true,
+      "credentials": {
+        "username": "op://Private/Wired/username",
+        "password": "op://Private/Wired/password"
+      }
+    },
+    "guardian": {
+      "enabled": true,
+      "credentials": {
+        "username": "op://Private/Guardian/username",
+        "password": "op://Private/Guardian/password"
+      }
+    },
+    "hbr": {
+      "enabled": false,
+      "credentials": {
+        "username": "env://HBR_USERNAME",
+        "password": "env://HBR_PASSWORD"
+      }
+    },
+    "medium": {
+      "enabled": false,
+      "credentials": {
+        "username": "bw://medium-login/username",
+        "password": "bw://medium-login/password"
+      }
+    },
+    "irishtimes": {
+      "enabled": false,
+      "credentials": {
+        "username": "your-email@example.com",
+        "password": "your-plain-text-password"
+      }
+    }
+  }
+}
