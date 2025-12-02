@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: "18.x"
 
@@ -21,6 +21,16 @@ jobs:
         run: |
           npm install
           npm run build
+
+      - name: Verify build artifacts
+        run: |
+          test -f main.js || { echo "Error: main.js not found"; exit 1; }
+          test -f manifest.json || { echo "Error: manifest.json not found"; exit 1; }
+          test -f styles.css || { echo "Error: styles.css not found"; exit 1; }
+          echo "All required files present"
+
+      - name: Run tests
+        run: npm test
 
       - name: Create release
         env:
@@ -31,13 +41,7 @@ jobs:
           gh release create "$tag" \
             --title="$tag" \
             --draft \
+            --generate-notes \
             main.js \
             manifest.json \
             styles.css
-
-      - name: Upload manifest.json to latest release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          gh release upload "$tag" manifest.json

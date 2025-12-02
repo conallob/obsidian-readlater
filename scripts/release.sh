@@ -3,7 +3,7 @@
 # Release script for Obsidian plugin
 # This script automates the release process for BRAT-compatible releases
 
-set -e
+set -euo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -28,6 +28,13 @@ print_warning() {
 print_error() {
     echo -e "${RED}✗${NC} $1"
 }
+
+# Check required dependencies
+if ! command -v jq &> /dev/null; then
+    print_error "jq is required but not installed"
+    print_info "Install with: brew install jq (macOS) or apt-get install jq (Linux)"
+    exit 1
+fi
 
 # Check if we're in a git repository
 if ! git rev-parse --git-dir > /dev/null 2>&1; then
@@ -92,22 +99,16 @@ esac
 
 # Bump version
 print_info "Bumping version..."
-if [ -n "$CUSTOM_VERSION" ]; then
-    # Update manifest.json
-    sed -i.bak "s/\"version\": \".*\"/\"version\": \"$CUSTOM_VERSION\"/" manifest.json && rm manifest.json.bak
+if [ -n "${CUSTOM_VERSION:-}" ]; then
+    # Update package.json with custom version
+    sed -i.bak "s/\"version\": \".*\"/\"version\": \"$CUSTOM_VERSION\"/" package.json && rm package.json.bak
 
-    # Update versions.json
-    MIN_APP_VERSION=$(grep '"minAppVersion"' manifest.json | sed -E 's/.*"minAppVersion": "([^"]+)".*/\1/')
-    # Create temporary file with updated versions.json
-    if [ -f versions.json ]; then
-        # Add new version to existing versions.json
-        jq ". + {\"$CUSTOM_VERSION\": \"$MIN_APP_VERSION\"}" versions.json > versions.json.tmp && mv versions.json.tmp versions.json
-    else
-        echo "{\"$CUSTOM_VERSION\": \"$MIN_APP_VERSION\"}" | jq . > versions.json
-    fi
+    # Use version-bump.mjs to update manifest.json and versions.json
+    npm_package_version=$CUSTOM_VERSION node version-bump.mjs
 
     NEW_VERSION=$CUSTOM_VERSION
 else
+    # npm version automatically runs version-bump.mjs via package.json scripts
     npm version $RELEASE_TYPE --no-git-tag-version
     NEW_VERSION=$(grep '"version"' manifest.json | sed -E 's/.*"version": "([^"]+)".*/\1/')
 fi
@@ -116,7 +117,7 @@ print_success "Version bumped to $NEW_VERSION"
 
 # Show what changed
 print_info "Changes to be committed:"
-git diff manifest.json versions.json
+git diff package.json manifest.json versions.json
 
 echo ""
 read -p "Commit and create release? (y/N) " -n 1 -r
@@ -129,7 +130,7 @@ fi
 
 # Commit changes
 print_info "Committing version bump..."
-git add manifest.json versions.json
+git add package.json manifest.json versions.json
 git commit -m "Release version $NEW_VERSION"
 
 # Create and push tag

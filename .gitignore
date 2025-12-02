@@ -16,7 +16,7 @@ pids
 *.seed
 *.pid.lock
 
-# Dependency directories
+# Dependencies
 node_modules/
 
 # TypeScript cache
@@ -63,22 +63,7 @@ node_modules/
 .yarn/install-state.gz
 .pnp.*
 
-# Obsidian
-data.json
-
-# build
-main.js
-*.js.map
-
-# OS
-.DS_Store
-*.log
-npm-debug.log*
-
-# Dependencies
-node_modules/
-
-# Build
+# Build output
 main.js
 *.js.map
 
@@ -93,7 +78,9 @@ Thumbs.db
 # Testing
 coverage/
 
+# Obsidian plugin data
+data.json
+
 # Credentials (never commit these!)
-.env
 credentials.json
 auth-state/
