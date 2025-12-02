@@ -12,14 +12,15 @@ This is an Obsidian plugin that syncs read-later articles from multiple news sit
 # Install dependencies
 npm install
 
-# Install Playwright browsers (required for provider automation)
-npx playwright install chromium
-
 # Development mode (watch & rebuild on changes)
 npm run dev
 
 # Production build
 npm run build
+
+# Install Playwright browsers (required for runtime provider automation)
+# Note: This is NOT needed for the build process, only for running the plugin/CLI
+npx playwright install chromium
 
 # Run tests
 npm test
