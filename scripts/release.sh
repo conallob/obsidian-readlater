@@ -100,8 +100,9 @@ esac
 # Bump version
 print_info "Bumping version..."
 if [ -n "${CUSTOM_VERSION:-}" ]; then
-    # Update package.json with custom version
-    sed -i.bak "s/\"version\": \".*\"/\"version\": \"$CUSTOM_VERSION\"/" package.json && rm package.json.bak
+    # Update package.json with custom version using temp file for cross-platform compatibility
+    sed "s/\"version\": \".*\"/\"version\": \"$CUSTOM_VERSION\"/" package.json > package.json.tmp
+    mv package.json.tmp package.json
 
     # Use version-bump.mjs to update manifest.json and versions.json
     npm_package_version=$CUSTOM_VERSION node version-bump.mjs
