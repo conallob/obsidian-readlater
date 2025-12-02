@@ -97,12 +97,25 @@ case $choice in
         ;;
 esac
 
+# Run build and tests before version bump
+print_info "Running build and tests..."
+if ! npm run build; then
+    print_error "Build failed. Please fix errors before releasing."
+    exit 1
+fi
+
+if ! npm test; then
+    print_error "Tests failed. Please fix errors before releasing."
+    exit 1
+fi
+
+print_success "Build and tests passed"
+
 # Bump version
 print_info "Bumping version..."
 if [ -n "${CUSTOM_VERSION:-}" ]; then
-    # Update package.json with custom version using temp file for cross-platform compatibility
-    sed "s/\"version\": \".*\"/\"version\": \"$CUSTOM_VERSION\"/" package.json > package.json.tmp
-    mv package.json.tmp package.json
+    # Use npm pkg to update package.json (cross-platform compatible)
+    npm pkg set version="$CUSTOM_VERSION"
 
     # Use version-bump.mjs to update manifest.json and versions.json
     npm_package_version=$CUSTOM_VERSION node version-bump.mjs
@@ -125,7 +138,7 @@ read -p "Commit and create release? (y/N) " -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     print_warning "Release cancelled. Changes have been made but not committed."
-    print_info "To revert: git checkout manifest.json versions.json"
+    print_info "To revert: git checkout package.json manifest.json versions.json"
     exit 0
 fi
 
@@ -145,7 +158,14 @@ git push --tags
 
 print_success "Release $NEW_VERSION created and pushed!"
 print_info "GitHub Actions will now build and create the release."
-print_info "Check: https://github.com/$(git remote get-url origin | sed -E 's/.*github.com[:\/](.+)\.git/\1/')/actions"
+
+# Get repository info using gh CLI for robustness
+REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo "")
+if [ -n "$REPO" ]; then
+    print_info "Check: https://github.com/$REPO/actions"
+else
+    print_info "Check your repository's Actions tab for build status"
+fi
 
 echo ""
 print_warning "Don't forget to:"
