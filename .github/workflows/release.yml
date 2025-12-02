@@ -23,6 +23,17 @@ jobs:
           npm install
           npm run build
 
+      - name: Validate version consistency
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          manifest_version=$(jq -r '.version' manifest.json)
+
+          if [ "$tag" != "$manifest_version" ]; then
+            echo "Error: Git tag ($tag) does not match manifest.json version ($manifest_version)"
+            exit 1
+          fi
+          echo "Version validation passed: $tag"
+
       - name: Verify build artifacts
         run: |
           test -f main.js || { echo "Error: main.js not found"; exit 1; }
@@ -45,4 +56,5 @@ jobs:
             --generate-notes \
             main.js \
             manifest.json \
-            styles.css
+            styles.css \
+            versions.json

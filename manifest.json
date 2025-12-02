@@ -6,5 +6,6 @@
 	"description": "Sync read-later articles from multiple news sites into Obsidian notes",
 	"author": "Conall O'Brien",
 	"authorUrl": "https://github.com/conallob/obsidian-readlater",
+	"fundingUrl": "",
 	"isDesktopOnly": false
 }
