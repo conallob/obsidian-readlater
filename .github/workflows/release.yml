@@ -27,7 +27,6 @@ jobs:
       - name: Build plugin
         run: |
           npm install
-          npx playwright install chromium --with-deps
           npm run build
 
       - name: Validate version consistency
@@ -67,8 +66,16 @@ jobs:
             echo "Warning: versions.json not found, skipping"
           fi
 
-          gh release create "$tag" \
+          # Create release with error handling
+          if ! gh release create "$tag" \
             --title="$tag" \
             --draft \
             --generate-notes \
-            $files
+            $files; then
+            echo "::error::Failed to create release for tag $tag"
+            echo "::notice::The tag $tag has been pushed but release creation failed."
+            echo "::notice::You can manually create the release at: https://github.com/${{ github.repository }}/releases/new?tag=$tag"
+            exit 1
+          fi
+
+          echo "::notice::Draft release created successfully. Review and publish at: https://github.com/${{ github.repository }}/releases"
