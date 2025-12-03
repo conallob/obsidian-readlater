@@ -46,6 +46,12 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
+if ! command -v gh &> /dev/null; then
+    print_error "gh CLI is required but not installed"
+    print_info "Install with: brew install gh (macOS) or see https://cli.github.com/manual/installation"
+    exit 1
+fi
+
 # Check if we're in a git repository
 if ! git rev-parse --git-dir > /dev/null 2>&1; then
     print_error "Not in a git repository"
@@ -79,12 +85,33 @@ version_gt() {
     test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"
 }
 
+# Function to calculate next version based on release type
+calculate_next_version() {
+    local current_version=$1
+    local release_type=$2
+
+    case $release_type in
+        patch)
+            echo "$current_version" | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g'
+            ;;
+        minor)
+            echo "$current_version" | awk -F. '{$(NF-1) = $(NF-1) + 1; $NF = 0;} 1' | sed 's/ /./g'
+            ;;
+        major)
+            echo "$current_version" | awk -F. '{$1 = $1 + 1; $2 = 0; $3 = 0;} 1' | sed 's/ /./g'
+            ;;
+        *)
+            echo "$current_version"
+            ;;
+    esac
+}
+
 # Determine release type
 echo ""
 echo "Select release type:"
-echo "  1) Patch (bug fixes)        - ${CURRENT_VERSION} → $(echo $CURRENT_VERSION | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')"
-echo "  2) Minor (new features)     - ${CURRENT_VERSION} → $(echo $CURRENT_VERSION | awk -F. '{$(NF-1) = $(NF-1) + 1; $NF = 0;} 1' | sed 's/ /./g')"
-echo "  3) Major (breaking changes) - ${CURRENT_VERSION} → $(echo $CURRENT_VERSION | awk -F. '{$1 = $1 + 1; $2 = 0; $3 = 0;} 1' | sed 's/ /./g')"
+echo "  1) Patch (bug fixes)        - ${CURRENT_VERSION} → $(calculate_next_version "$CURRENT_VERSION" patch)"
+echo "  2) Minor (new features)     - ${CURRENT_VERSION} → $(calculate_next_version "$CURRENT_VERSION" minor)"
+echo "  3) Major (breaking changes) - ${CURRENT_VERSION} → $(calculate_next_version "$CURRENT_VERSION" major)"
 echo "  4) Custom version"
 echo ""
 read -p "Enter choice (1-4): " choice
@@ -143,24 +170,20 @@ if [ "$DRY_RUN" = false ]; then
     if [ -n "${CUSTOM_VERSION:-}" ]; then
         # Use npm version for consistency (it triggers version-bump.mjs hook)
         npm version "$CUSTOM_VERSION" --no-git-tag-version
-        NEW_VERSION=$CUSTOM_VERSION
     else
         # npm version automatically runs version-bump.mjs via package.json scripts
         npm version $RELEASE_TYPE --no-git-tag-version
-        NEW_VERSION=$(jq -r '.version' manifest.json)
     fi
 
+    # Read version from package.json after npm version (single source of truth)
+    NEW_VERSION=$(jq -r '.version' package.json)
     print_success "Version bumped to $NEW_VERSION"
 else
     # Dry run - calculate what the version would be
     if [ -n "${CUSTOM_VERSION:-}" ]; then
         NEW_VERSION=$CUSTOM_VERSION
     else
-        case $RELEASE_TYPE in
-            patch) NEW_VERSION=$(echo $CURRENT_VERSION | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g') ;;
-            minor) NEW_VERSION=$(echo $CURRENT_VERSION | awk -F. '{$(NF-1) = $(NF-1) + 1; $NF = 0;} 1' | sed 's/ /./g') ;;
-            major) NEW_VERSION=$(echo $CURRENT_VERSION | awk -F. '{$1 = $1 + 1; $2 = 0; $3 = 0;} 1' | sed 's/ /./g') ;;
-        esac
+        NEW_VERSION=$(calculate_next_version "$CURRENT_VERSION" "$RELEASE_TYPE")
     fi
     print_info "Would bump version to $NEW_VERSION"
 fi
@@ -168,7 +191,12 @@ fi
 # Show what changed
 if [ "$DRY_RUN" = false ]; then
     print_info "Changes to be committed:"
-    git diff package.json manifest.json versions.json
+    DIFF_OUTPUT=$(git diff package.json manifest.json versions.json)
+    if [ -n "$DIFF_OUTPUT" ]; then
+        echo "$DIFF_OUTPUT"
+    else
+        print_warning "No changes detected (this may indicate a problem with version bump)"
+    fi
 else
     print_info "Would update: package.json, manifest.json, versions.json"
 fi

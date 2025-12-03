@@ -28,6 +28,8 @@ jobs:
         run: |
           npm install
           npm run build
+          # Note: Playwright browsers are NOT needed for build, only for runtime provider automation
+          # No need to run 'npx playwright install' here
 
       - name: Validate version consistency
         run: |
@@ -42,10 +44,20 @@ jobs:
 
       - name: Verify build artifacts
         run: |
+          # Check files exist
           test -f main.js || { echo "Error: main.js not found"; exit 1; }
           test -f manifest.json || { echo "Error: manifest.json not found"; exit 1; }
           test -f styles.css || { echo "Error: styles.css not found"; exit 1; }
-          echo "All required files present"
+
+          # Check files are not empty
+          test -s main.js || { echo "Error: main.js is empty"; exit 1; }
+          test -s manifest.json || { echo "Error: manifest.json is empty"; exit 1; }
+          test -s styles.css || { echo "Error: styles.css is empty"; exit 1; }
+
+          # Validate manifest.json is valid JSON
+          jq empty manifest.json || { echo "Error: manifest.json is not valid JSON"; exit 1; }
+
+          echo "All required files present and valid"
 
       - name: Run tests
         run: npm test
@@ -54,14 +66,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Verify gh CLI is available
+          if ! command -v gh &> /dev/null; then
+            echo "::error::gh CLI is not installed"
+            exit 1
+          fi
+
           tag="${GITHUB_REF#refs/tags/}"
 
-          # Build file list for release
-          files="main.js manifest.json styles.css"
+          # Build file list for release as an array to handle spaces safely
+          files=(main.js manifest.json styles.css)
 
           # Add versions.json if it exists
           if [ -f versions.json ]; then
-            files="$files versions.json"
+            files+=(versions.json)
           else
             echo "Warning: versions.json not found, skipping"
           fi
@@ -71,7 +89,7 @@ jobs:
             --title="$tag" \
             --draft \
             --generate-notes \
-            $files; then
+            "${files[@]}"; then
             echo "::error::Failed to create release for tag $tag"
             echo "::notice::The tag $tag has been pushed but release creation failed."
             echo "::notice::You can manually create the release at: https://github.com/${{ github.repository }}/releases/new?tag=$tag"
