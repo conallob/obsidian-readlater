@@ -65,10 +65,13 @@ if ! git diff-index --quiet HEAD --; then
     exit 1
 fi
 
-# Check if on main branch
+# Get the default branch from git config or fall back to 'main'
+DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+
+# Check if on default branch
 CURRENT_BRANCH=$(git branch --show-current)
-if [ "$CURRENT_BRANCH" != "main" ]; then
-    print_warning "You are on branch '$CURRENT_BRANCH', not 'main'"
+if [ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]; then
+    print_warning "You are on branch '$CURRENT_BRANCH', not '$DEFAULT_BRANCH'"
     read -p "Continue anyway? (y/N) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -76,13 +79,46 @@ if [ "$CURRENT_BRANCH" != "main" ]; then
     fi
 fi
 
+# Check if a remote repository is configured
+if ! git remote get-url origin &> /dev/null; then
+    print_error "No remote repository 'origin' is configured"
+    print_info "Add a remote with: git remote add origin <repository-url>"
+    exit 1
+fi
+
 # Get current version from manifest.json using jq for robust parsing
 CURRENT_VERSION=$(jq -r '.version' manifest.json)
 print_info "Current version: $CURRENT_VERSION"
 
 # Function to compare semantic versions (returns 0 if $1 > $2, 1 otherwise)
+# Handles both standard versions (1.2.3) and pre-release versions (1.2.3-beta.1)
 version_gt() {
-    test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"
+    local v1=$1
+    local v2=$2
+
+    # Extract base version and pre-release parts
+    local v1_base=$(echo "$v1" | cut -d'-' -f1)
+    local v2_base=$(echo "$v2" | cut -d'-' -f1)
+    local v1_pre=$(echo "$v1" | grep -o '\-.*' || echo "")
+    local v2_pre=$(echo "$v2" | grep -o '\-.*' || echo "")
+
+    # Compare base versions first
+    if [ "$v1_base" != "$v2_base" ]; then
+        test "$(printf '%s\n' "$v1_base" "$v2_base" | sort -V | head -n 1)" != "$v1_base"
+    else
+        # Base versions equal - compare pre-release tags
+        # No pre-release > pre-release (e.g., 1.0.0 > 1.0.0-beta)
+        if [ -z "$v1_pre" ] && [ -n "$v2_pre" ]; then
+            return 0  # v1 > v2
+        elif [ -n "$v1_pre" ] && [ -z "$v2_pre" ]; then
+            return 1  # v1 < v2
+        elif [ -n "$v1_pre" ] && [ -n "$v2_pre" ]; then
+            # Both have pre-release - compare lexicographically
+            test "$(printf '%s\n' "$v1_pre" "$v2_pre" | sort -V | head -n 1)" != "$v1_pre"
+        else
+            return 1  # Equal versions
+        fi
+    fi
 }
 
 # Function to calculate next version based on release type
@@ -175,8 +211,8 @@ if [ "$DRY_RUN" = false ]; then
         npm version $RELEASE_TYPE --no-git-tag-version
     fi
 
-    # Read version from package.json after npm version (single source of truth)
-    NEW_VERSION=$(jq -r '.version' package.json)
+    # Read version from manifest.json after npm version (single source of truth for Obsidian)
+    NEW_VERSION=$(jq -r '.version' manifest.json)
     print_success "Version bumped to $NEW_VERSION"
 else
     # Dry run - calculate what the version would be
@@ -191,7 +227,8 @@ fi
 # Show what changed
 if [ "$DRY_RUN" = false ]; then
     print_info "Changes to be committed:"
-    DIFF_OUTPUT=$(git diff package.json manifest.json versions.json)
+    # Check both staged and unstaged changes to catch files modified by npm version hook
+    DIFF_OUTPUT=$(git diff HEAD package.json manifest.json versions.json)
     if [ -n "$DIFF_OUTPUT" ]; then
         echo "$DIFF_OUTPUT"
     else
