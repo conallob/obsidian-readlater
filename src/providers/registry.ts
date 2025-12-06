@@ -6,7 +6,7 @@ import { MediumProvider } from './medium';
 import { IrishTimesProvider } from './irishtimes';
 
 export class ProviderRegistry {
-  private providers: Map<string, typeof ReadLaterProvider>;
+  private providers: Map<string, new (config: any) => ReadLaterProvider>;
 
   constructor(private settings: ReadLaterSettings) {
     this.providers = new Map();
@@ -21,7 +21,7 @@ export class ProviderRegistry {
     this.register('irishtimes', IrishTimesProvider);
   }
 
-  private register(name: string, providerClass: typeof ReadLaterProvider): void {
+  private register(name: string, providerClass: new (config: any) => ReadLaterProvider): void {
     this.providers.set(name, providerClass);
   }
 
