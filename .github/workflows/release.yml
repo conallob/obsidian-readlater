@@ -27,6 +27,7 @@ jobs:
       - name: Extract version from git tag
         id: get_version
         run: |
+          set -e  # Exit immediately if a command fails
           tag="${GITHUB_REF#refs/tags/}"
           # Strip leading 'v' prefix if present (e.g., v0.0.10 -> 0.0.10)
           version="${tag#v}"
@@ -38,6 +39,7 @@ jobs:
 
       - name: Set version in manifest
         run: |
+          set -e  # Exit immediately if a command fails
           # Replace __VERSION__ template with actual version from git tag
           # Note: This modifies manifest.json in the build environment only.
           # The source repository retains the __VERSION__ template for future releases.
@@ -47,6 +49,14 @@ jobs:
 
       - name: Update versions.json
         run: |
+          set -e  # Exit immediately if a command fails
+
+          # Verify versions.json exists
+          if [ ! -f versions.json ]; then
+            echo "Error: versions.json not found"
+            exit 1
+          fi
+
           # Extract minAppVersion from manifest
           min_app_version=$(jq -r '.minAppVersion' manifest.json) || {
             echo "Error: Failed to read minAppVersion from manifest.json"
@@ -68,6 +78,7 @@ jobs:
 
       - name: Verify version substitution
         run: |
+          set -e  # Exit immediately if a command fails
           if grep -q "__VERSION__" manifest.json; then
             echo "Error: __VERSION__ template not replaced in manifest.json"
             exit 1
@@ -76,6 +87,7 @@ jobs:
 
       - name: Build plugin
         run: |
+          set -e  # Exit immediately if a command fails
           npm install
           npm run build
           # Note: Playwright browsers are NOT needed for build, only for runtime provider automation
@@ -83,6 +95,7 @@ jobs:
 
       - name: Validate version consistency
         run: |
+          set -e  # Exit immediately if a command fails
           manifest_version=$(jq -r '.version' manifest.json) || {
             echo "Error: Failed to read version from manifest.json"
             exit 1
@@ -96,6 +109,7 @@ jobs:
 
       - name: Verify build artifacts
         run: |
+          set -e  # Exit immediately if a command fails
           # Check files exist
           test -f main.js || { echo "Error: main.js not found"; exit 1; }
           test -f manifest.json || { echo "Error: manifest.json not found"; exit 1; }
@@ -118,6 +132,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e  # Exit immediately if a command fails
           # Verify gh CLI is available
           if ! command -v gh &> /dev/null; then
             echo "::error::gh CLI is not installed"
