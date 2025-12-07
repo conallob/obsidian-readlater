@@ -33,6 +33,14 @@ jobs:
           version="${tag#v}"
           echo "Git tag: $tag"
           echo "Semantic version: $version"
+
+          # Validate semantic version format (X.Y.Z or X.Y.Z-prerelease)
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "Error: Invalid semantic version format: $version"
+            echo "Expected format: X.Y.Z or X.Y.Z-prerelease (e.g., 1.0.0 or 1.0.0-beta.1)"
+            exit 1
+          fi
+
           # Export to GITHUB_ENV for use in subsequent steps
           echo "VERSION=$version" >> $GITHUB_ENV
           echo "GIT_TAG=$tag" >> $GITHUB_ENV
@@ -65,7 +73,6 @@ jobs:
 
           # Add new version entry to versions.json
           # Note: Uses temp_versions.json to avoid file corruption during jq processing
-          # This file is also modified in the build environment only
           jq --arg version "$VERSION" --arg minVer "$min_app_version" \
             '. + {($version): $minVer}' versions.json > temp_versions.json || {
             echo "Error: Failed to update versions.json"
@@ -84,6 +91,33 @@ jobs:
             exit 1
           fi
           echo "Version substitution verified successfully"
+
+      - name: Commit versions.json to repository
+        run: |
+          set -e  # Exit immediately if a command fails
+          # Configure git for the workflow
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Restore manifest.json to keep __VERSION__ template in source
+          git checkout manifest.json
+
+          # Commit only versions.json with the new version entry
+          git add versions.json
+          if git diff --staged --quiet; then
+            echo "No changes to versions.json, skipping commit"
+          else
+            git commit -m "Update versions.json: add $VERSION"
+            git push origin HEAD:main || {
+              echo "Warning: Failed to push versions.json update to main branch"
+              echo "This may happen if main is protected or if there are conflicts"
+              echo "You may need to manually update versions.json in the repository"
+            }
+          fi
+
+          # Re-apply version substitution to manifest.json for build
+          sed -i "s|__VERSION__|$VERSION|g" manifest.json
+          echo "Re-applied version substitution to manifest.json for build"
 
       - name: Build plugin
         run: |
@@ -114,14 +148,17 @@ jobs:
           test -f main.js || { echo "Error: main.js not found"; exit 1; }
           test -f manifest.json || { echo "Error: manifest.json not found"; exit 1; }
           test -f styles.css || { echo "Error: styles.css not found"; exit 1; }
+          test -f versions.json || { echo "Error: versions.json not found"; exit 1; }
 
           # Check files are not empty
           test -s main.js || { echo "Error: main.js is empty"; exit 1; }
           test -s manifest.json || { echo "Error: manifest.json is empty"; exit 1; }
           test -s styles.css || { echo "Error: styles.css is empty"; exit 1; }
+          test -s versions.json || { echo "Error: versions.json is empty"; exit 1; }
 
-          # Validate manifest.json is valid JSON
+          # Validate JSON files
           jq empty manifest.json || { echo "Error: manifest.json is not valid JSON"; exit 1; }
+          jq empty versions.json || { echo "Error: versions.json is not valid JSON"; exit 1; }
 
           echo "All required files present and valid"
 
@@ -142,12 +179,12 @@ jobs:
           # Build file list for release as an array to handle spaces safely
           files=(main.js manifest.json styles.css)
 
-          # Add versions.json if it exists
-          if [ -f versions.json ]; then
-            files+=(versions.json)
-          else
-            echo "Warning: versions.json not found, skipping"
+          # Verify versions.json exists (required for release)
+          if [ ! -f versions.json ]; then
+            echo "Error: versions.json not found"
+            exit 1
           fi
+          files+=(versions.json)
 
           # Create release with error handling
           # Use GIT_TAG (with 'v' prefix) for GitHub release name
