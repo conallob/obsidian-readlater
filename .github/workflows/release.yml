@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release # Only allow one release at a time
+  cancel-in-progress: false  # Let releases complete, don't cancel
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -24,84 +28,229 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      - name: Extract version from git tag
+        id: get_version
+        run: |
+          set -e  # Exit immediately if a command fails
+          tag="${GITHUB_REF#refs/tags/}"
+          # Strip leading 'v' prefix if present (e.g., v0.0.10 -> 0.0.10)
+          version="${tag#v}"
+          echo "Git tag: $tag"
+          echo "Semantic version: $version"
+
+          # Validate semantic version format (X.Y.Z or X.Y.Z-prerelease+build)
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$ ]]; then
+            echo "Error: Invalid semantic version format: $version"
+            echo "Expected format: X.Y.Z, X.Y.Z-prerelease, or X.Y.Z-prerelease+build"
+            echo "Examples: 1.0.0, 1.0.0-beta.1, 1.0.0-beta.1+001"
+            exit 1
+          fi
+
+          # Export to GITHUB_ENV for use in subsequent steps
+          echo "VERSION=$version" >> $GITHUB_ENV
+          echo "GIT_TAG=$tag" >> $GITHUB_ENV
+
+      - name: Set version in manifest
+        run: |
+          set -e  # Exit immediately if a command fails
+          # Replace __VERSION__ template with actual version from git tag
+          # Note: This modifies manifest.json in the build environment only.
+          # The source repository retains the __VERSION__ template for future releases.
+          sed -i "s|__VERSION__|$VERSION|g" manifest.json
+          echo "Updated manifest.json:"
+          cat manifest.json
+
+      - name: Update versions.json
+        run: |
+          set -e  # Exit immediately if a command fails
+
+          # Cleanup temp files on exit
+          trap 'rm -f temp_versions.json' EXIT
+
+          # Verify versions.json exists and is tracked in git
+          if [ ! -f versions.json ]; then
+            echo "::error::versions.json not found in repository"
+            echo "::notice::Please create versions.json with initial content: {}"
+            exit 1
+          fi
+
+          if ! git ls-files --error-unmatch versions.json &>/dev/null; then
+            echo "::error::versions.json must be tracked in git"
+            echo "::notice::Run: git add versions.json && git commit -m 'Add versions.json'"
+            exit 1
+          fi
+
+          # Extract minAppVersion from manifest
+          min_app_version=$(jq -r '.minAppVersion' manifest.json) || {
+            echo "::error::Failed to read minAppVersion from manifest.json"
+            exit 1
+          }
+
+          # Add new version entry to versions.json
+          # Note: Uses temp_versions.json to avoid file corruption during jq processing
+          jq --arg version "$VERSION" --arg minVer "$min_app_version" \
+            '. + {($version): $minVer}' versions.json > temp_versions.json || {
+            echo "::error::Failed to update versions.json"
+            exit 1
+          }
+          mv temp_versions.json versions.json
+
+          echo "Updated versions.json:"
+          cat versions.json
+
+      - name: Verify version substitution
+        run: |
+          set -e  # Exit immediately if a command fails
+          if grep -q "__VERSION__" manifest.json; then
+            echo "Error: __VERSION__ template not replaced in manifest.json"
+            exit 1
+          fi
+          echo "Version substitution verified successfully"
+
+      - name: Commit versions.json to repository via GitHub API
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e  # Exit immediately if a command fails
+
+          # Get the SHA of the current versions.json file on main branch
+          CURRENT_SHA=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/versions.json?ref=main" \
+            | jq -r '.sha')
+
+          if [ "$CURRENT_SHA" == "null" ]; then
+            echo "::error::Failed to fetch versions.json SHA from main branch"
+            echo "::notice::Ensure versions.json exists on the main branch"
+            exit 1
+          fi
+
+          # Base64 encode the updated versions.json
+          CONTENT=$(base64 -w 0 versions.json)
+
+          # Create commit message
+          COMMIT_MSG="chore: update versions.json for $VERSION [skip ci]"
+
+          # Update versions.json on main branch using GitHub API
+          RESPONSE=$(curl -s -X PUT \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/versions.json" \
+            -d @- <<EOF
+{
+  "message": "$COMMIT_MSG",
+  "content": "$CONTENT",
+  "sha": "$CURRENT_SHA",
+  "branch": "main",
+  "committer": {
+    "name": "github-actions[bot]",
+    "email": "github-actions[bot]@users.noreply.github.com"
+  }
+}
+EOF
+)
+
+          # Check if the API call was successful
+          if echo "$RESPONSE" | jq -e '.commit.sha' > /dev/null; then
+            COMMIT_SHA=$(echo "$RESPONSE" | jq -r '.commit.sha')
+            echo "Successfully updated versions.json on main branch"
+            echo "Commit SHA: $COMMIT_SHA"
+          else
+            ERROR_MSG=$(echo "$RESPONSE" | jq -r '.message // "Unknown error"')
+            echo "::error::Failed to update versions.json via GitHub API: $ERROR_MSG"
+            echo "::notice::Please manually update versions.json with: {\"$VERSION\": \"$(jq -r '.minAppVersion' manifest.json)\"}"
+            exit 1
+          fi
+
       - name: Build plugin
         run: |
+          set -e  # Exit immediately if a command fails
           npm install
           npm run build
           # Note: Playwright browsers are NOT needed for build, only for runtime provider automation
           # No need to run 'npx playwright install' here
 
-      - name: Set version in manifest
-        run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          echo "Setting version to: $tag"
-          # Replace __VERSION__ template with actual version from git tag
-          sed -i "s/__VERSION__/$tag/g" manifest.json
-          echo "Updated manifest.json:"
-          cat manifest.json
-
-      - name: Validate version consistency
-        run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          manifest_version=$(jq -r '.version' manifest.json)
-
-          if [ "$tag" != "$manifest_version" ]; then
-            echo "Error: Git tag ($tag) does not match manifest.json version ($manifest_version)"
-            exit 1
-          fi
-          echo "Version validation passed: $tag"
+      - name: Run tests
+        run: npm test
 
       - name: Verify build artifacts
         run: |
+          set -e  # Exit immediately if a command fails
           # Check files exist
-          test -f main.js || { echo "Error: main.js not found"; exit 1; }
-          test -f manifest.json || { echo "Error: manifest.json not found"; exit 1; }
-          test -f styles.css || { echo "Error: styles.css not found"; exit 1; }
+          test -f main.js || { echo "::error::main.js not found"; exit 1; }
+          test -f manifest.json || { echo "::error::manifest.json not found"; exit 1; }
+          test -f styles.css || { echo "::error::styles.css not found"; exit 1; }
+          test -f versions.json || { echo "::error::versions.json not found"; exit 1; }
 
           # Check files are not empty
-          test -s main.js || { echo "Error: main.js is empty"; exit 1; }
-          test -s manifest.json || { echo "Error: manifest.json is empty"; exit 1; }
-          test -s styles.css || { echo "Error: styles.css is empty"; exit 1; }
+          test -s main.js || { echo "::error::main.js is empty"; exit 1; }
+          test -s manifest.json || { echo "::error::manifest.json is empty"; exit 1; }
+          test -s styles.css || { echo "::error::styles.css is empty"; exit 1; }
+          test -s versions.json || { echo "::error::versions.json is empty"; exit 1; }
 
-          # Validate manifest.json is valid JSON
-          jq empty manifest.json || { echo "Error: manifest.json is not valid JSON"; exit 1; }
+          # Validate JSON files
+          jq empty manifest.json || { echo "::error::manifest.json is not valid JSON"; exit 1; }
+          jq empty versions.json || { echo "::error::versions.json is not valid JSON"; exit 1; }
 
           echo "All required files present and valid"
 
-      - name: Run tests
-        run: npm test
+      - name: Validate built version
+        run: |
+          set -e  # Exit immediately if a command fails
+
+          # Validate manifest.json contains correct version
+          manifest_version=$(jq -r '.version' manifest.json) || {
+            echo "::error::Failed to read version from manifest.json"
+            exit 1
+          }
+
+          if [ "$VERSION" != "$manifest_version" ]; then
+            echo "::error::Manifest version mismatch"
+            echo "Expected: $VERSION, Found: $manifest_version"
+            exit 1
+          fi
+
+          # Validate built code contains the version
+          # Search for version string in main.js (it should be embedded in the build)
+          if ! grep -q "\"version\":\"$VERSION\"" main.js && ! grep -q "'version':'$VERSION'" main.js; then
+            echo "::warning::Could not verify version in built main.js"
+            echo "This may be expected if the build process doesn't embed manifest.json"
+          else
+            echo "Version $VERSION verified in built artifacts"
+          fi
+
+          echo "Version validation passed: $VERSION"
 
       - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e  # Exit immediately if a command fails
           # Verify gh CLI is available
           if ! command -v gh &> /dev/null; then
             echo "::error::gh CLI is not installed"
             exit 1
           fi
 
-          tag="${GITHUB_REF#refs/tags/}"
-
           # Build file list for release as an array to handle spaces safely
           files=(main.js manifest.json styles.css)
 
-          # Add versions.json if it exists
-          if [ -f versions.json ]; then
-            files+=(versions.json)
-          else
-            echo "Warning: versions.json not found, skipping"
+          # Verify versions.json exists (required for release)
+          if [ ! -f versions.json ]; then
+            echo "Error: versions.json not found"
+            exit 1
           fi
+          files+=(versions.json)
 
           # Create release with error handling
-          if ! gh release create "$tag" \
-            --title="$tag" \
+          # Use GIT_TAG (with 'v' prefix) for GitHub release name
+          if ! gh release create "$GIT_TAG" \
+            --title="$GIT_TAG" \
             --draft \
             --generate-notes \
             "${files[@]}"; then
-            echo "::error::Failed to create release for tag $tag"
-            echo "::notice::The tag $tag has been pushed but release creation failed."
-            echo "::notice::You can manually create the release at: https://github.com/${{ github.repository }}/releases/new?tag=$tag"
+            echo "::error::Failed to create release for tag $GIT_TAG"
+            echo "::notice::The tag $GIT_TAG has been pushed but release creation failed."
+            echo "::notice::You can manually create the release at: https://github.com/${{ github.repository }}/releases/new?tag=$GIT_TAG"
             exit 1
           fi
 
