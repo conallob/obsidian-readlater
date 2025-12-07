@@ -31,6 +31,15 @@ jobs:
           # Note: Playwright browsers are NOT needed for build, only for runtime provider automation
           # No need to run 'npx playwright install' here
 
+      - name: Set version in manifest
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          echo "Setting version to: $tag"
+          # Replace __VERSION__ template with actual version from git tag
+          sed -i "s/__VERSION__/$tag/g" manifest.json
+          echo "Updated manifest.json:"
+          cat manifest.json
+
       - name: Validate version consistency
         run: |
           tag="${GITHUB_REF#refs/tags/}"
