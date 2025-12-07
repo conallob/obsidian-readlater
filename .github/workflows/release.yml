@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release # Only allow one release at a time
   cancel-in-progress: false  # Let releases complete, don't cancel
 
 jobs:
