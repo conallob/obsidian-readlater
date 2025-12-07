@@ -27,19 +27,24 @@ jobs:
       - name: Set version in manifest
         run: |
           tag="${GITHUB_REF#refs/tags/}"
-          echo "Setting version to: $tag"
+          # Strip leading 'v' prefix if present (e.g., v0.0.10 -> 0.0.10)
+          version="${tag#v}"
+          echo "Git tag: $tag"
+          echo "Setting version to: $version"
           # Replace __VERSION__ template with actual version from git tag
-          sed -i "s|__VERSION__|$tag|g" manifest.json
+          sed -i "s|__VERSION__|$version|g" manifest.json
           echo "Updated manifest.json:"
           cat manifest.json
 
       - name: Update versions.json
         run: |
           tag="${GITHUB_REF#refs/tags/}"
+          # Strip leading 'v' prefix if present (e.g., v0.0.10 -> 0.0.10)
+          version="${tag#v}"
           min_app_version=$(jq -r '.minAppVersion' manifest.json)
 
           # Add new version entry to versions.json
-          jq --arg version "$tag" --arg minVer "$min_app_version" \
+          jq --arg version "$version" --arg minVer "$min_app_version" \
             '. + {($version): $minVer}' versions.json > versions.json.tmp
           mv versions.json.tmp versions.json
 
@@ -64,13 +69,15 @@ jobs:
       - name: Validate version consistency
         run: |
           tag="${GITHUB_REF#refs/tags/}"
+          # Strip leading 'v' prefix if present (e.g., v0.0.10 -> 0.0.10)
+          version="${tag#v}"
           manifest_version=$(jq -r '.version' manifest.json)
 
-          if [ "$tag" != "$manifest_version" ]; then
-            echo "Error: Git tag ($tag) does not match manifest.json version ($manifest_version)"
+          if [ "$version" != "$manifest_version" ]; then
+            echo "Error: Version ($version) does not match manifest.json version ($manifest_version)"
             exit 1
           fi
-          echo "Version validation passed: $tag"
+          echo "Version validation passed: $version"
 
       - name: Verify build artifacts
         run: |
