@@ -24,21 +24,42 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      - name: Set version in manifest
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          echo "Setting version to: $tag"
+          # Replace __VERSION__ template with actual version from git tag
+          sed -i "s|__VERSION__|$tag|g" manifest.json
+          echo "Updated manifest.json:"
+          cat manifest.json
+
+      - name: Update versions.json
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          min_app_version=$(jq -r '.minAppVersion' manifest.json)
+
+          # Add new version entry to versions.json
+          jq --arg version "$tag" --arg minVer "$min_app_version" \
+            '. + {($version): $minVer}' versions.json > versions.json.tmp
+          mv versions.json.tmp versions.json
+
+          echo "Updated versions.json:"
+          cat versions.json
+
+      - name: Verify version substitution
+        run: |
+          if grep -q "__VERSION__" manifest.json; then
+            echo "Error: __VERSION__ template not replaced in manifest.json"
+            exit 1
+          fi
+          echo "Version substitution verified successfully"
+
       - name: Build plugin
         run: |
           npm install
           npm run build
           # Note: Playwright browsers are NOT needed for build, only for runtime provider automation
           # No need to run 'npx playwright install' here
-
-      - name: Set version in manifest
-        run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          echo "Setting version to: $tag"
-          # Replace __VERSION__ template with actual version from git tag
-          sed -i "s/__VERSION__/$tag/g" manifest.json
-          echo "Updated manifest.json:"
-          cat manifest.json
 
       - name: Validate version consistency
         run: |
