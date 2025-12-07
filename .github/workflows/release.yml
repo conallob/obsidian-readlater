@@ -24,29 +24,44 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Set version in manifest
+      - name: Extract version from git tag
+        id: get_version
         run: |
           tag="${GITHUB_REF#refs/tags/}"
           # Strip leading 'v' prefix if present (e.g., v0.0.10 -> 0.0.10)
           version="${tag#v}"
           echo "Git tag: $tag"
-          echo "Setting version to: $version"
+          echo "Semantic version: $version"
+          # Export to GITHUB_ENV for use in subsequent steps
+          echo "VERSION=$version" >> $GITHUB_ENV
+          echo "GIT_TAG=$tag" >> $GITHUB_ENV
+
+      - name: Set version in manifest
+        run: |
           # Replace __VERSION__ template with actual version from git tag
-          sed -i "s|__VERSION__|$version|g" manifest.json
+          # Note: This modifies manifest.json in the build environment only.
+          # The source repository retains the __VERSION__ template for future releases.
+          sed -i "s|__VERSION__|$VERSION|g" manifest.json
           echo "Updated manifest.json:"
           cat manifest.json
 
       - name: Update versions.json
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          # Strip leading 'v' prefix if present (e.g., v0.0.10 -> 0.0.10)
-          version="${tag#v}"
-          min_app_version=$(jq -r '.minAppVersion' manifest.json)
+          # Extract minAppVersion from manifest
+          min_app_version=$(jq -r '.minAppVersion' manifest.json) || {
+            echo "Error: Failed to read minAppVersion from manifest.json"
+            exit 1
+          }
 
           # Add new version entry to versions.json
-          jq --arg version "$version" --arg minVer "$min_app_version" \
-            '. + {($version): $minVer}' versions.json > versions.json.tmp
-          mv versions.json.tmp versions.json
+          # Note: Uses temp_versions.json to avoid file corruption during jq processing
+          # This file is also modified in the build environment only
+          jq --arg version "$VERSION" --arg minVer "$min_app_version" \
+            '. + {($version): $minVer}' versions.json > temp_versions.json || {
+            echo "Error: Failed to update versions.json"
+            exit 1
+          }
+          mv temp_versions.json versions.json
 
           echo "Updated versions.json:"
           cat versions.json
@@ -68,16 +83,16 @@ jobs:
 
       - name: Validate version consistency
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          # Strip leading 'v' prefix if present (e.g., v0.0.10 -> 0.0.10)
-          version="${tag#v}"
-          manifest_version=$(jq -r '.version' manifest.json)
+          manifest_version=$(jq -r '.version' manifest.json) || {
+            echo "Error: Failed to read version from manifest.json"
+            exit 1
+          }
 
-          if [ "$version" != "$manifest_version" ]; then
-            echo "Error: Version ($version) does not match manifest.json version ($manifest_version)"
+          if [ "$VERSION" != "$manifest_version" ]; then
+            echo "Error: Expected version ($VERSION) does not match manifest.json version ($manifest_version)"
             exit 1
           fi
-          echo "Version validation passed: $version"
+          echo "Version validation passed: $VERSION"
 
       - name: Verify build artifacts
         run: |
@@ -109,8 +124,6 @@ jobs:
             exit 1
           fi
 
-          tag="${GITHUB_REF#refs/tags/}"
-
           # Build file list for release as an array to handle spaces safely
           files=(main.js manifest.json styles.css)
 
@@ -122,14 +135,15 @@ jobs:
           fi
 
           # Create release with error handling
-          if ! gh release create "$tag" \
-            --title="$tag" \
+          # Use GIT_TAG (with 'v' prefix) for GitHub release name
+          if ! gh release create "$GIT_TAG" \
+            --title="$GIT_TAG" \
             --draft \
             --generate-notes \
             "${files[@]}"; then
-            echo "::error::Failed to create release for tag $tag"
-            echo "::notice::The tag $tag has been pushed but release creation failed."
-            echo "::notice::You can manually create the release at: https://github.com/${{ github.repository }}/releases/new?tag=$tag"
+            echo "::error::Failed to create release for tag $GIT_TAG"
+            echo "::notice::The tag $GIT_TAG has been pushed but release creation failed."
+            echo "::notice::You can manually create the release at: https://github.com/${{ github.repository }}/releases/new?tag=$GIT_TAG"
             exit 1
           fi
 
